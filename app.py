@@ -138,6 +138,7 @@ HTML = '''<!DOCTYPE html>
     <div class="logo-icon">🔗</div>
     <h1>Encurtador de Links</h1>
     <p class="subtitle">Seu encurtador pessoal &mdash; sem limites, sem custo</p>
+    <a href="/historico" style="display:inline-block;margin-top:8px;color:#6c63ff;font-size:13px;text-decoration:none;">📋 Ver histórico completo →</a>
   </div>
 
   <label>Seu link longo</label>
@@ -270,16 +271,123 @@ def encurtar():
             db.execute('INSERT INTO links (codigo, url) VALUES (?,?)', (codigo, url))
 
     base = request.host_url.rstrip('/')
-    return jsonify({'curto': f'{base}/r/{codigo}'})
+    return jsonify({'curto': f'{base}/{codigo}'})
 
-@app.route('/r/<codigo>')
+@app.route('/<codigo>')
 def redirecionar(codigo):
+    if codigo in ('', 'encurtar', 'favicon.ico'):
+        return '', 404
     with get_db() as db:
         row = db.execute('SELECT url FROM links WHERE codigo=?', (codigo,)).fetchone()
         if not row:
             return 'Link não encontrado.', 404
         db.execute('UPDATE links SET cliques = cliques + 1 WHERE codigo=?', (codigo,))
     return redirect(row['url'], code=302)
+
+HIST_HTML = '''<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Histórico — Encurtador</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+           background: #0f0f1a; min-height: 100vh; padding: 40px 20px; }
+    .wrap { max-width: 720px; margin: 0 auto; }
+    .top { display:flex; align-items:center; justify-content:space-between; margin-bottom:28px; }
+    h1 { color:#fff; font-size:22px; }
+    .back { color:#6c63ff; text-decoration:none; font-size:14px; }
+    .back:hover { text-decoration:underline; }
+    .stats { color:#6b6b8a; font-size:13px; margin-bottom:20px; }
+    table { width:100%; border-collapse:collapse; }
+    thead th {
+      text-align:left; color:#6b6b8a; font-size:11px; text-transform:uppercase;
+      letter-spacing:.5px; padding:0 16px 10px; font-weight:700;
+    }
+    tbody tr {
+      background:#1a1a2e; border-bottom:1px solid #0f0f1a;
+      transition: background .15s;
+    }
+    tbody tr:hover { background:#222240; }
+    tbody tr:first-child td:first-child { border-radius:12px 0 0 0; }
+    tbody tr:first-child td:last-child  { border-radius:0 12px 0 0; }
+    tbody tr:last-child  td:first-child { border-radius:0 0 0 12px; }
+    tbody tr:last-child  td:last-child  { border-radius:0 0 12px 0; }
+    td { padding:14px 16px; vertical-align:middle; }
+    .td-orig { color:#4a4a6a; font-size:12px; max-width:280px;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .td-short a { color:#a78bfa; font-size:13px; font-weight:600; text-decoration:none; }
+    .td-short a:hover { text-decoration:underline; }
+    .td-clicks { color:#6b6b8a; font-size:13px; text-align:center; }
+    .td-date { color:#4a4a6a; font-size:12px; white-space:nowrap; }
+    .btn-copy {
+      background:#2a2a4a; border:none; border-radius:6px;
+      padding:5px 10px; color:#9090aa; font-size:12px; cursor:pointer;
+      transition:all .2s;
+    }
+    .btn-copy:hover { background:#3a3a5a; color:#fff; }
+    .btn-copy.ok { background:#1a3a1a; color:#4ade80; }
+    .empty { color:#4a4a6a; text-align:center; padding:60px 0; font-size:15px; }
+    .badge { display:inline-block; background:#6c63ff22; color:#a78bfa;
+             border-radius:20px; padding:2px 10px; font-size:11px; font-weight:700; }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="top">
+    <h1>📋 Histórico de Links</h1>
+    <a class="back" href="/">← Voltar</a>
+  </div>
+  <p class="stats">{{ total }} link{{ "s" if total != 1 else "" }} encurtado{{ "s" if total != 1 else "" }} • {{ cliques_total }} clique{{ "s" if cliques_total != 1 else "" }} no total</p>
+  {% if links %}
+  <table>
+    <thead>
+      <tr>
+        <th>Link original</th>
+        <th>Link curto</th>
+        <th style="text-align:center">Cliques</th>
+        <th>Data</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for l in links %}
+      <tr>
+        <td class="td-orig" title="{{ l.url }}">{{ l.url }}</td>
+        <td class="td-short"><a href="/{{ l.codigo }}" target="_blank">{{ base }}/{{ l.codigo }}</a></td>
+        <td class="td-clicks"><span class="badge">{{ l.cliques }}</span></td>
+        <td class="td-date">{{ l.criado[:16].replace("T"," ") }}</td>
+        <td><button class="btn-copy" onclick="copiar('{{ base }}/{{ l.codigo }}', this)">Copiar</button></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="empty">Nenhum link encurtado ainda.</p>
+  {% endif %}
+</div>
+<script>
+function copiar(url, btn) {
+  navigator.clipboard.writeText(url).then(() => {
+    btn.textContent = '✓';
+    btn.classList.add('ok');
+    setTimeout(() => { btn.textContent = 'Copiar'; btn.classList.remove('ok'); }, 2000);
+  });
+}
+</script>
+</body>
+</html>'''
+
+@app.route('/historico')
+def historico():
+    with get_db() as db:
+        links = db.execute('SELECT * FROM links ORDER BY id DESC').fetchall()
+        total = len(links)
+        cliques_total = sum(l['cliques'] for l in links)
+    base = request.host_url.rstrip('/')
+    return render_template_string(HIST_HTML, links=links, total=total,
+                                   cliques_total=cliques_total, base=base)
 
 # ── Inicialização ──────────────────────────────────────────────────────
 init_db()
