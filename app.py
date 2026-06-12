@@ -397,7 +397,7 @@ def listar_clientes():
 def encurtar():
     data    = request.get_json(silent=True) or {}
     url     = (data.get('url') or '').strip()
-    cliente = (data.get('cliente') or 'Geral').strip() or 'Geral'
+    cliente = ' '.join((data.get('cliente') or '').split()).title() or 'Geral'
 
     if not url:
         return jsonify({'erro': 'URL não informada'}), 400
@@ -405,9 +405,10 @@ def encurtar():
         return jsonify({'erro': 'URL deve começar com http:// ou https://'}), 400
 
     with get_db() as db:
-        # Reutiliza se mesma URL + mesmo cliente
-        row = db.execute('SELECT codigo FROM links WHERE url=? AND cliente=?',
-                         (url, cliente)).fetchone()
+        # Reutiliza se mesma URL + mesmo cliente (comparação sem case)
+        row = db.execute(
+            'SELECT codigo FROM links WHERE url=? AND LOWER(cliente)=LOWER(?)',
+            (url, cliente)).fetchone()
         if row:
             codigo = row['codigo']
         else:
