@@ -1,8 +1,20 @@
-from flask import Flask, request, redirect, render_template_string, jsonify
+from flask import Flask, request, redirect, render_template_string, jsonify, session
+from functools import wraps
 import sqlite3, random, string, os
 
+SENHA = os.environ.get('SENHA_HISTORICO', 'admin123')
+
 app = Flask(__name__)
+app.secret_key = os.environ.get('SECRET_KEY', 'chave-secreta-mude-isso')
 DB = os.path.join(os.path.dirname(__file__), 'links.db')
+
+def login_required(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if not session.get('autenticado'):
+            return redirect('/login?next=' + request.path)
+        return f(*args, **kwargs)
+    return decorated
 
 # ── Banco de dados ─────────────────────────────────────────────────────
 def get_db():
@@ -340,7 +352,10 @@ HIST_HTML = '''<!DOCTYPE html>
   <div class="main">
     <div class="top">
       <h1>{{ cliente_atual or "Todos os links" }}</h1>
-      <a class="back" href="/">← Encurtar novo link</a>
+      <div style="display:flex;gap:16px;align-items:center;">
+        <a class="back" href="/">← Encurtar novo link</a>
+        <a class="back" href="/logout" style="color:#f87171;">Sair</a>
+      </div>
     </div>
     <p class="stats">{{ links|length }} link{{ "s" if links|length != 1 else "" }} • {{ cliques_total }} clique{{ "s" if cliques_total != 1 else "" }}</p>
 
@@ -424,7 +439,7 @@ def encurtar():
 
 @app.route('/<codigo>')
 def redirecionar(codigo):
-    if codigo in ('', 'encurtar', 'historico', 'clientes', 'favicon.ico'):
+    if codigo in ('', 'encurtar', 'historico', 'clientes', 'login', 'logout', 'favicon.ico'):
         return '', 404
     with get_db() as db:
         row = db.execute('SELECT url FROM links WHERE codigo=?', (codigo,)).fetchone()
@@ -433,7 +448,61 @@ def redirecionar(codigo):
         db.execute('UPDATE links SET cliques = cliques + 1 WHERE codigo=?', (codigo,))
     return redirect(row['url'], code=302)
 
+LOGIN_HTML = '''<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login — Encurtador</title>
+  <style>
+    ''' + CSS + '''
+    body { display:flex; align-items:center; justify-content:center; min-height:100vh; padding:20px; }
+    .card { background:#1a1a2e; border:1px solid #2a2a4a; border-radius:20px;
+            padding:48px 40px; width:100%; max-width:380px; box-shadow:0 20px 60px rgba(0,0,0,.5); }
+    h1 { color:#fff; font-size:22px; font-weight:700; text-align:center; margin-bottom:6px; }
+    .sub { color:#6b6b8a; font-size:13px; text-align:center; margin-bottom:32px; }
+    .field { margin-bottom:16px; }
+    input[type=password] { width:100%; }
+    .err { color:#f87171; font-size:13px; margin-bottom:12px; display:none; }
+    .err.visible { display:block; }
+    .btn { width:100%; margin-top:4px; }
+  </style>
+</head>
+<body>
+<div class="card">
+  <h1>🔒 Área restrita</h1>
+  <p class="sub">Digite a senha para acessar o histórico</p>
+  <p class="err {{ 'visible' if erro else '' }}">Senha incorreta. Tente novamente.</p>
+  <form method="POST" action="/login">
+    <input type="hidden" name="next" value="{{ next }}">
+    <div class="field">
+      <label>Senha</label>
+      <input type="password" name="senha" autofocus placeholder="••••••••">
+    </div>
+    <button type="submit" class="btn">Entrar</button>
+  </form>
+</div>
+</body>
+</html>'''
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    next_url = request.args.get('next', '/historico')
+    if request.method == 'POST':
+        next_url = request.form.get('next', '/historico')
+        if request.form.get('senha') == SENHA:
+            session['autenticado'] = True
+            return redirect(next_url)
+        return render_template_string(LOGIN_HTML, erro=True, next=next_url)
+    return render_template_string(LOGIN_HTML, erro=False, next=next_url)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect('/')
+
 @app.route('/historico')
+@login_required
 def historico():
     cliente_atual = request.args.get('cliente', '').strip()
     base = request.host_url.rstrip('/')
