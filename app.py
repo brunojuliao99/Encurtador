@@ -214,8 +214,11 @@ async function encurtar() {
     res.classList.add('visible');
     document.getElementById('inp').value = '';
 
-    sessao.unshift({original: url, curto: d.curto, cliente});
-    renderHist();
+    // Só adiciona se ainda não existe o mesmo curto na sessão
+    if (!sessao.find(i => i.curto === d.curto)) {
+      sessao.unshift({original: url, curto: d.curto, cliente});
+      renderHist();
+    }
   } catch(e) {
     mostrarErro(e.message);
   } finally {
